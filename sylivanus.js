@@ -8,10 +8,7 @@ import path, { join } from 'path'
 import { platform } from 'process'
 import { fileURLToPath, pathToFileURL } from 'url'
 import * as ws from 'ws'
-import { EventEmitter } from 'events'
 import qrcodeTerminal from 'qrcode-terminal'
-
-EventEmitter.defaultMaxListeners = Infinity
 import { loadSession } from './lib/makesession.js'
 import clearTmp from './lib/tempclear.js'
 import newsletterHandler from './lib/newsletter.js'
@@ -212,7 +209,7 @@ const connectionOptions = {
     ),
   },
   markOnlineOnConnect: true,
-  generateHighQualityLinkPreview: true,
+  generateHighQualityLinkPreview: false,
   getMessage: async key => {
     return { conversation: '' }
   },
@@ -457,18 +454,6 @@ global.reloadHandler = async function (restatConn) {
   conn.connectionUpdate = connectionUpdate.bind(global.conn)
   conn.credsUpdate = saveCreds.bind(global.conn, true)
 
-  const currentDateTime = new Date()
-  const messageDateTime = new Date(conn.ev)
-  if (currentDateTime >= messageDateTime) {
-    const chats = Object.entries(conn.chats)
-      .filter(([jid, chat]) => !jid.endsWith('@g.us') && chat.isChats)
-      .map(v => v[0])
-  } else {
-    const chats = Object.entries(conn.chats)
-      .filter(([jid, chat]) => !jid.endsWith('@g.us') && chat.isChats)
-      .map(v => v[0])
-  }
-
   conn._evCleanup = conn.ev.process(async (events) => {
     if (events['messages.upsert']) {
       const upsert = events['messages.upsert']
@@ -566,58 +551,36 @@ Object.freeze(global.reload)
 watch(pluginFolder, global.reload)
 await global.reloadHandler()
 async function _quickTest() {
-  const test = await Promise.all(
-    [
-      spawn('ffmpeg'),
-      spawn('ffprobe'),
-      spawn('ffmpeg', [
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-filter_complex',
-        'color',
-        '-frames:v',
-        '1',
-        '-f',
-        'webp',
-        '-',
-      ]),
-      spawn('convert'),
-      spawn('magick'),
-      spawn('gm'),
-      spawn('find', ['--version']),
-    ].map(p => {
-      return Promise.race([
-        new Promise(resolve => {
-          p.on('close', code => {
-            resolve(code !== 127)
-          })
-        }),
-        new Promise(resolve => {
-          p.on('error', _ => resolve(false))
-        }),
-      ])
-    })
-  )
-  const [ffmpeg, ffprobe, ffmpegWebp, convert, magick, gm, find] = test
-  const s = (global.support = {
-    ffmpeg,
-    ffprobe,
-    ffmpegWebp,
-    convert,
-    magick,
-    gm,
-    find,
+  const check = (cmd, args = []) => new Promise(resolve => {
+    const p = spawn(cmd, args)
+    p.on('error', () => resolve(false))
+    p.on('close', code => resolve(code !== 127))
   })
-  Object.freeze(global.support)
+  const [ffmpeg, ffprobe, convert] = await Promise.all([
+    check('ffmpeg', ['-version']),
+    check('ffprobe', ['-version']),
+    check('convert', ['--version']),
+  ])
+  global.support = Object.freeze({ ffmpeg, ffprobe, ffmpegWebp: ffmpeg, convert, magick: false, gm: false, find: true })
 }
 
 async function saafsafai() {
   if (stopped === 'close' || !conn || !conn.user) return
-  clearsession()
-  console.log(chalk.cyanBright('\nStored Sessions Cleared'))
+  try {
+    clearsession()
+  } catch {}
 }
 
 setInterval(saafsafai, 10 * 60 * 1000)
+
+setInterval(() => {
+  try { if (global.gc) global.gc() } catch {}
+  const mem = process.memoryUsage()
+  if (mem.heapUsed > 350 * 1024 * 1024) {
+    console.log(chalk.yellow(`⚠️ High memory: ${Math.round(mem.heapUsed / 1024 / 1024)}MB - clearing caches`))
+    if (global.db?.data?.msgs) global.db.data.msgs = {}
+    if (global.db?.data?.sticker) global.db.data.sticker = {}
+  }
+}, 60 * 1000)
 
 _quickTest().catch(console.error)
