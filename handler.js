@@ -30,13 +30,20 @@ const { getAggregateVotesInPollMessage } = await (
 export async function handler(chatUpdate) {
   this.msgqueque = this.msgqueque || []
   if (!chatUpdate) return
-  this.pushMessage(chatUpdate.messages).catch(console.error)
+  if (typeof this.pushMessage === 'function') {
+    this.pushMessage(chatUpdate.messages).catch(console.error)
+  }
   let m = chatUpdate.messages[chatUpdate.messages.length - 1]
   if (!m) return
   if (global.db.data == null) await global.loadDatabase()
   try {
     m = smsg(this, m) || m
     if (!m) return
+    if (m.isBaileys) return
+    const senderName = m.pushName || m.sender?.split('@')[0] || 'Unknown'
+    const chatLabel = m.isGroup ? (m.chat?.split('@')[0] || 'group') : 'DM'
+    const msgPreview = m.text ? m.text.slice(0, 80) : `[${m.mtype || 'unknown'}]`
+    process.stdout.write(`[HANDLER] ${senderName} (${chatLabel}): ${msgPreview}\n`)
     m.exp = 0
     m.credit = false
     m.bank = false
@@ -202,7 +209,10 @@ export async function handler(chatUpdate) {
     if (process.env.MODE && process.env.MODE.toLowerCase() === 'private' && !(isROwner || isOwner))
       return
 
-    if (m.isBaileys) return
+    if (m.isBaileys) {
+      console.log(`[DEBUG] Skipping message - isBaileys=true, id: ${m.id}`)
+      return
+    }
     m.exp += Math.ceil(Math.random() * 10)
 
     let usedPrefix
@@ -375,6 +385,7 @@ export async function handler(chatUpdate) {
           continue
         }
         m.isCommand = true
+        process.stdout.write(`[CMD] ${senderName} ran: ${usedPrefix}${command} ${args.join(' ')}`.trim() + ` | plugin: ${name}\n`)
         let xp = 'exp' in plugin ? parseInt(plugin.exp) : 17 // XP Earning per command
         if (xp > 200) m.reply('cheater')
         else m.exp += xp
@@ -421,9 +432,9 @@ export async function handler(chatUpdate) {
           await plugin.call(this, m, extra)
           if (!isPrems) m.credit = m.credit || plugin.credit || false
         } catch (e) {
-          // Error occured
           m.error = e
-          console.error(e)
+          process.stdout.write(`[ERR] Command failed: ${usedPrefix}${command} | plugin: ${name} | ${e.message || e}\n`)
+          process.stderr.write(`${e.stack || e}\n`)
           if (e) {
             let text = format(e)
             for (let key of Object.values(global.APIKeys))

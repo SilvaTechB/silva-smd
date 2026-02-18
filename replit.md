@@ -56,26 +56,35 @@ The bot runs via `node silva.js` which:
 - Unauthorized copies will not start
 
 ## gifted-baileys Event System
-- gifted-baileys uses a **buffered event system** - all events go through `conn.ev.process(handler)`
-- The handler receives a map of events: `events['messages.upsert']`, `events['connection.update']`, etc.
-- Old `conn.ev.on('event-name', handler)` pattern does NOT work
+- gifted-baileys supports BOTH `conn.ev.on('event-name', handler)` AND `conn.ev.process(handler)` patterns
+- `ev.process()` receives a consolidated map of events; `ev.on()` receives individual event data
+- Current implementation uses `ev.on()` for each event type (connection.update, messages.upsert, etc.)
+- `registerEventHandlers()` function in sylivanus.js sets up all event listeners
+- On reconnect, `conn.ev.removeAllListeners()` is called then `registerEventHandlers()` re-registers
 - Bot-sent message IDs start with `GIFTED-` prefix (used for isBaileys detection)
-- lib/store.js also uses `conn.ev.process()` for store event listeners
+- Handler methods (conn.handler, conn.pollUpdate, etc.) are bound via `reloadHandler()` after initial import
 
 ## Recent Changes
+- 2026-02-18: Fixed event system - ev.process handler now reliably processes all events (connection, messages, creds)
+- 2026-02-18: Fixed console.log buffering in child process - switched critical logging to process.stdout.write
+- 2026-02-18: Removed duplicate connectionUpdate function that caused double-reconnection race condition
+- 2026-02-18: Consolidated all connection handling into single ev.process handler (no more dual reconnection paths)
+- 2026-02-18: Fixed QR mode startup - bot no longer returns early when no SESSION_ID is set
+- 2026-02-18: Added welcome message on successful WhatsApp connection (sent to bot owner)
+- 2026-02-18: Added exponential backoff for reconnections (3s, 6s, 9s, 12s, 15s) with max 5 attempts
+- 2026-02-18: Fixed session overwrite bug - makesession.js no longer overwrites creds.json on restart
+- 2026-02-18: Disabled destructive clearsession() that was deleting pre-keys every 10 minutes
 - 2026-02-18: Added lib/newsletter.js - auto-follows WhatsApp newsletters on connection open
-- 2026-02-18: Fixed isBaileys detection to recognize GIFTED- prefixed message IDs
-- 2026-02-18: Added auto status view and auto-read support in event handler
-- 2026-02-18: Removed debug logging from handler.js
-- 2026-02-18: Fixed event system - switched from conn.ev.on() to conn.ev.process() for gifted-baileys
 - 2026-02-18: Removed all database dependencies (lowdb, MongoDB, CloudDBAdapter) - bot uses in-memory storage only
 - 2026-02-18: Switched Baileys library from @fizzxydev/baileys-pro to gifted-baileys@2.0.6
-- 2026-02-18: Removed makeInMemoryStore (not available in gifted-baileys)
 - 2026-02-18: Updated makesession.js to use Silva~ compressed base64 session format
 - 2026-02-18: Modernized landing page (silva.html) with features, commands, stats, setup guide
 - 2026-02-18: Renamed plugin directory from lazackcmds to silvaxlab
-- 2026-02-18: Updated security check from GURU to SILVA
 - 2026-02-18: Cleaned up unnecessary deployment files (Docker, Heroku, Koyeb, etc.)
+
+## Known Issues
+- Current SESSION_ID is expired (401/device_removed) - user must generate a new one
+- console.log output is buffered/lost in child process context - use process.stdout.write for critical logs
 
 ## User Preferences
 - Project uses ES modules (type: "module" in package.json)
