@@ -46,16 +46,12 @@ import { makeWASocket, protoType, serialize } from './lib/simple.js'
 const {
   DisconnectReason,
   useMultiFileAuthState,
-  MessageRetryMap,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   proto,
   delay,
   jidNormalizedUser,
-  PHONENUMBER_MCC,
-} = await (
-  await import('@whiskeysockets/baileys')
-).default
+} = await import('@whiskeysockets/baileys')
 
 import readline from 'readline'
 
@@ -260,16 +256,132 @@ store?.bind(conn.ev)
 
 let connectionFailures = 0
 const MAX_FAILURES = 5
+let hasCompletedFirstConnect = false
+let unsubscribeProcess = null
+const processedMsgIds = new Set()
+
+const log = (msg) => process.stdout.write(msg + '\n')
+
+async function handleMessagesUpsert(upsert) {
+  if (!upsert || !upsert.messages || !upsert.messages.length) return
+
+  const msgs = upsert.messages
+  const msgType = upsert.type
+
+  for (const msg of msgs) {
+    const msgId = msg.key?.id
+    if (!msgId) continue
+    if (processedMsgIds.has(msgId)) continue
+    processedMsgIds.add(msgId)
+    if (processedMsgIds.size > 1000) {
+      const entries = [...processedMsgIds]
+      entries.slice(0, 500).forEach(id => processedMsgIds.delete(id))
+    }
+
+    const from = msg.key?.remoteJid || 'unknown'
+    const isFromMe = msg.key?.fromMe || false
+    const pushName = msg.pushName || 'Unknown'
+    const msgContent = msg.message || {}
+    const mtype = Object.keys(msgContent).filter(k => k !== 'messageContextInfo' && k !== 'senderKeyDistributionMessage').join(', ') || 'empty'
+    const text = msgContent.conversation || msgContent.extendedTextMessage?.text || msgContent.imageMessage?.caption || msgContent.videoMessage?.caption || ''
+    const isGroup = from.endsWith('@g.us')
+    const isStatus = from === 'status@broadcast'
+    const participant = msg.key?.participant || ''
+    const senderDisplay = isGroup ? `${pushName} in ${from.split('@')[0]}` : `${pushName} (${from.split('@')[0]})`
+
+    log(`\n╔══════════════════════════════════════`)
+    log(`║ 📨 MESSAGE ${msgType === 'notify' ? '[REAL-TIME]' : '[SYNC]'}`)
+    log(`║ 👤 From: ${senderDisplay}`)
+    log(`║ 📝 Type: ${mtype}`)
+    if (text) log(`║ 💬 Text: "${text.slice(0, 100)}"`)
+    log(`║ 🆔 ID: ${msgId.slice(0, 25)}`)
+    log(`║ 📤 FromMe: ${isFromMe} | Group: ${isGroup} | Status: ${isStatus}`)
+    log(`╚══════════════════════════════════════`)
+
+    try {
+      if (isStatus && !isFromMe) {
+        const statusSender = participant?.split('@')[0] || 'unknown'
+        if (process.env.statusview === 'true' || process.env.AUTO_STATUS_LIKE === 'true') {
+          await global.conn.readMessages([msg.key]).catch(() => {})
+          log(`[STATUS] 👁️ Viewed status from ${pushName} (${statusSender})`)
+        }
+        if (process.env.AUTO_STATUS_LIKE === 'true') {
+          const likeEmoji = process.env.AUTO_STATUS_LIKE_EMOJI || '💚'
+          const myJid = global.conn.user?.id ? jidNormalizedUser(global.conn.user.id) : null
+          if (myJid) {
+            await global.conn.sendMessage('status@broadcast', {
+              react: { key: msg.key, text: likeEmoji }
+            }, {
+              statusJidList: [participant, myJid]
+            }).catch(() => {})
+            log(`[STATUS] ${likeEmoji} Liked status from ${pushName} (${statusSender})`)
+          }
+        }
+        if (process.env.Status_Saver === 'true') {
+          try {
+            const ownerJid = global.conn.user?.id ? jidNormalizedUser(global.conn.user.id) : null
+            if (ownerJid) {
+              await global.conn.copyNForward(ownerJid, msg, true).catch(() => {})
+              const caption = msgContent.imageMessage?.caption || msgContent.videoMessage?.caption || ''
+              await global.conn.sendMessage(ownerJid, {
+                text: `*AUTO STATUS SAVER*\n*From:* ${pushName}\n*Caption:* ${caption || 'None'}`,
+                mentions: [participant]
+              }).catch(() => {})
+              log(`[STATUS] 💾 Saved status from ${pushName} (${statusSender})`)
+            }
+          } catch (e) {}
+        }
+        if (process.env.STATUS_REPLY === 'true') {
+          try {
+            const replyMsg = process.env.STATUS_MSG || 'SILVA MD SUCCESSFULLY VIEWED YOUR STATUS'
+            const quotedStatus = {
+              key: { remoteJid: 'status@broadcast', id: msg.key.id, participant },
+              message: msg.message
+            }
+            await global.conn.sendMessage(participant, { text: replyMsg }, { quoted: quotedStatus }).catch(() => {})
+            log(`[STATUS] 💬 Replied to status from ${pushName}`)
+          } catch (e) {}
+        }
+      }
+      if (process.env.autoRead === 'true' && !isStatus) {
+        await global.conn.readMessages([msg.key]).catch(() => {})
+      }
+    } catch (e) {}
+  }
+
+  if (global.conn.handler) {
+    try {
+      await global.conn.handler(upsert)
+    } catch (e) {
+      log(`[HANDLER-ERR] ${e.message}\n${e.stack}`)
+    }
+  } else {
+    log(`[WARN] conn.handler is NOT set - messages will not be processed!`)
+  }
+}
 
 function registerEventHandlers() {
   const ev = global.conn.ev
 
-  const log = (msg) => process.stdout.write(msg + '\n')
+  if (unsubscribeProcess) {
+    try { unsubscribeProcess() } catch {}
+    unsubscribeProcess = null
+  }
 
-  ev.process(async (events) => {
+  const originalEmit = ev.emit.bind(ev)
+  ev.emit = function(eventName, ...args) {
+    if (eventName === 'messages.upsert') {
+      log(`[RAW-EMIT] messages.upsert intercepted (${args[0]?.messages?.length || 0} msgs, type: ${args[0]?.type})`)
+      handleMessagesUpsert(args[0]).catch(e => log(`[EMIT-ERR] ${e.message}`))
+    }
+    return originalEmit(eventName, ...args)
+  }
+
+  unsubscribeProcess = ev.process(async (events) => {
     if (events['connection.update']) {
       const update = events['connection.update']
       const { qr, connection, lastDisconnect } = update
+      if (connection) log(`[CONN] Status: ${connection}`)
 
       if (qr) {
         log('\n📱 QR CODE GENERATED - Scan with WhatsApp:\n')
@@ -284,12 +396,24 @@ function registerEventHandlers() {
         try { process.send({ type: 'connected' }) } catch (e) {}
         const { jid, name } = global.conn.user || {}
         log(`📱 Logged in as: ${name || 'Unknown'} (${jid || 'N/A'})`)
-        const prefix = global.prefix || '.'
-        const pluginCount = Object.keys(global.plugins || {}).length
-        const mode = process.env.MODE || 'public'
-        const botName = process.env.BOTNAME || 'Silva MD Bot'
-        const uptime = new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
-        const welcomeMsg = `╭━━━━━━━━━━━━━━━━━╮
+
+        const pluginNames = Object.keys(global.plugins || {})
+        log(`\n╔══════════════════════════════════════`)
+        log(`║ 🧩 LOADED PLUGINS: ${pluginNames.length}`)
+        log(`╠══════════════════════════════════════`)
+        pluginNames.forEach((name, i) => {
+          log(`║ ${String(i + 1).padStart(3)}. ${name}`)
+        })
+        log(`╚══════════════════════════════════════\n`)
+
+        if (!hasCompletedFirstConnect) {
+          hasCompletedFirstConnect = true
+          const prefix = global.prefix || '.'
+          const pluginCount = pluginNames.length
+          const mode = process.env.MODE || 'public'
+          const botName = process.env.BOTNAME || 'Silva MD Bot'
+          const uptime = new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
+          const welcomeMsg = `╭━━━━━━━━━━━━━━━━━╮
 ┃  *${botName}*  
 ┃  _Connected Successfully_
 ╰━━━━━━━━━━━━━━━━━╯
@@ -315,18 +439,33 @@ Your bot is now online and ready.
 https://whatsapp.com/channel/0029VaAkETLLY6d8qhLmZt2v
 
 > Type *${prefix}menu* to see all commands`
-        try {
-          await global.conn.sendMessage(jid, { text: welcomeMsg, mentions: [jid] }, { quoted: null })
-        } catch (e) {
-          log(`[CONN] Could not send welcome message: ${e.message}`)
+          try {
+            await global.conn.sendMessage(jid, { text: welcomeMsg, mentions: [jid] }, { quoted: null })
+            log(`[CONN] Welcome message sent to ${jid}`)
+          } catch (e) {
+            log(`[CONN] Could not send welcome message: ${e.message}`)
+          }
+          await delay(3000)
+
+          try {
+            const myJid = jidNormalizedUser(global.conn.user.id)
+            await global.conn.sendMessage(myJid, { text: '.ping' })
+            log(`[SELF-TEST] Sent .ping command to self for verification`)
+          } catch (e) {
+            log(`[SELF-TEST] Could not send self-test: ${e.message}`)
+          }
+
+          await delay(3000)
+          try {
+            newsletterHandler.follow({
+              sock: global.conn,
+              config: global.config || {},
+              logMessage: (level, msg) => log(msg)
+            }).catch(() => {})
+          } catch (e) {}
+        } else {
+          log('[CONN] Reconnected successfully (skipping welcome/newsletters)')
         }
-        try {
-          newsletterHandler.follow({
-            sock: global.conn,
-            config: global.config || {},
-            logMessage: (level, msg) => log(msg)
-          }).catch(() => {})
-        } catch (e) {}
       }
       if (connection === 'close') {
         const code = lastDisconnect?.error?.output?.statusCode
@@ -357,7 +496,7 @@ https://whatsapp.com/channel/0029VaAkETLLY6d8qhLmZt2v
           try { process.send('reset') } catch {}
         }
 
-        const backoff = Math.min(connectionFailures * 3000, 15000)
+        const backoff = code === 440 ? Math.min(connectionFailures * 10000, 60000) : Math.min(connectionFailures * 3000, 15000)
         log(`[CONN] Reconnecting in ${backoff/1000}s...`)
         await delay(backoff)
         try {
@@ -377,90 +516,26 @@ https://whatsapp.com/channel/0029VaAkETLLY6d8qhLmZt2v
       await saveCreds()
     }
 
-    if (events['messages.upsert']) {
-      const upsert = events['messages.upsert']
-      const msgCount = upsert?.messages?.length || 0
-      const firstMsg = upsert?.messages?.[0]
-      const from = firstMsg?.key?.remoteJid || 'unknown'
-      log(`[MSG] ${msgCount} msg(s) from ${from.slice(0,20)} | type: ${upsert?.type}`)
-
-      const msgs = upsert.messages || []
-      for (const msg of msgs) {
-        try {
-          if (msg.key?.remoteJid === 'status@broadcast' && !msg.key?.fromMe) {
-            if (process.env.statusview === 'true' || process.env.AUTO_STATUS_LIKE === 'true') {
-              await global.conn.readMessages([msg.key]).catch(() => {})
-            }
-            if (process.env.AUTO_STATUS_LIKE === 'true') {
-              const likeEmoji = process.env.AUTO_STATUS_LIKE_EMOJI || '💚'
-              const myJid = global.conn.user?.id ? jidNormalizedUser(global.conn.user.id) : null
-              if (myJid) {
-                await global.conn.sendMessage('status@broadcast', {
-                  react: { key: msg.key, text: likeEmoji }
-                }, {
-                  statusJidList: [msg.key.participant, myJid]
-                }).catch(() => {})
-                log(`[STATUS] Liked status from ${msg.key.participant?.split('@')[0] || 'unknown'} with ${likeEmoji}`)
-              }
-            }
-            if (process.env.Status_Saver === 'true') {
-              try {
-                const senderName = msg.pushName || global.conn.getName?.(msg.key.participant) || 'Unknown'
-                const ownerJid = global.conn.user?.id ? jidNormalizedUser(global.conn.user.id) : null
-                if (ownerJid) {
-                  await global.conn.copyNForward(ownerJid, msg, true).catch(() => {})
-                  const caption = msg.message?.imageMessage?.caption || msg.message?.videoMessage?.caption || ''
-                  await global.conn.sendMessage(ownerJid, {
-                    text: `*AUTO STATUS SAVER*\n*From:* ${senderName}\n*Caption:* ${caption || 'None'}`,
-                    mentions: [msg.key.participant]
-                  }).catch(() => {})
-                  log(`[STATUS] Saved status from ${senderName}`)
-                }
-              } catch (e) {}
-            }
-            if (process.env.STATUS_REPLY === 'true') {
-              try {
-                const replyMsg = process.env.STATUS_MSG || 'SILVA MD 💖💖 SUCCESSFULLY VIEWED YOUR STATUS'
-                const quotedStatus = {
-                  key: { remoteJid: 'status@broadcast', id: msg.key.id, participant: msg.key.participant },
-                  message: msg.message
-                }
-                await global.conn.sendMessage(msg.key.participant, { text: replyMsg }, { quoted: quotedStatus }).catch(() => {})
-              } catch (e) {}
-            }
-          }
-          if (process.env.autoRead === 'true' && msg.key?.remoteJid !== 'status@broadcast') {
-            await global.conn.readMessages([msg.key]).catch(() => {})
-          }
-        } catch (e) {}
-      }
-
-      if (global.conn.handler) {
-        try {
-          await global.conn.handler(upsert)
-        } catch (e) {
-          log(`[HANDLER-ERR] ${e.message}`)
-        }
-      }
-    }
-
     if (events['messages.update']) {
-      if (global.conn.pollUpdate) global.conn.pollUpdate(events['messages.update'])
+      const updates = events['messages.update']
+      if (global.conn.pollUpdate) global.conn.pollUpdate(updates)
     }
     if (events['group-participants.update']) {
-      if (global.conn.participantsUpdate) global.conn.participantsUpdate(events['group-participants.update'])
+      const update = events['group-participants.update']
+      log(`[GROUP] Participant update: ${JSON.stringify(update).slice(0, 200)}`)
+      if (global.conn.participantsUpdate) global.conn.participantsUpdate(update)
     }
     if (events['groups.update']) {
-      if (global.conn.groupsUpdate) global.conn.groupsUpdate(events['groups.update'])
+      const update = events['groups.update']
+      if (global.conn.groupsUpdate) global.conn.groupsUpdate(update)
     }
     if (events['message.delete']) {
-      if (global.conn.onDelete) global.conn.onDelete(events['message.delete'])
-    }
-    if (events['presence.update']) {
-      if (global.conn.presenceUpdate) global.conn.presenceUpdate(events['presence.update'])
+      const update = events['message.delete']
+      if (global.conn.onDelete) global.conn.onDelete(update)
     }
   })
-  log('Event listeners registered via ev.process')
+
+  log('Event handlers registered (emit intercept + ev.process)')
 }
 registerEventHandlers()
 
@@ -469,7 +544,7 @@ if (pairingCode && !conn.authState.creds.registered) {
   if (!!global.pairingNumber) {
     phoneNumber = global.pairingNumber.replace(/[^0-9]/g, '')
 
-    if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
+    if (phoneNumber.length < 7) {
       console.log(
         chalk.bgBlack(chalk.redBright("Start with your country's WhatsApp code, Example : 254xxx"))
       )
@@ -481,7 +556,7 @@ if (pairingCode && !conn.authState.creds.registered) {
     )
     phoneNumber = phoneNumber.replace(/[^0-9]/g, '')
 
-    if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
+    if (phoneNumber.length < 7) {
       console.log(
         chalk.bgBlack(chalk.redBright("Start with your country's WhatsApp code, Example : 254xxx"))
       )
@@ -552,7 +627,10 @@ global.reloadHandler = async function (restatConn) {
     try {
       global.conn.ws.close()
     } catch {}
-    conn.ev.removeAllListeners()
+    if (unsubscribeProcess) {
+      try { unsubscribeProcess() } catch {}
+      unsubscribeProcess = null
+    }
     global.conn = makeWASocket(connectionOptions, {
       chats: oldChats,
     })
@@ -659,6 +737,12 @@ async function saafsafai() {
 }
 
 setInterval(saafsafai, 10 * 60 * 1000)
+
+setInterval(() => {
+  const connState = global.conn?.ws?.readyState
+  const stateNames = { 0: 'CONNECTING', 1: 'OPEN', 2: 'CLOSING', 3: 'CLOSED' }
+  process.stdout.write(`[HEARTBEAT] Bot alive | WS: ${stateNames[connState] || connState} | User: ${global.conn?.user?.id?.split(':')[0] || 'none'} | Plugins: ${Object.keys(global.plugins || {}).length} | Handler: ${!!global.conn?.handler}\n`)
+}, 60000)
 
 setInterval(() => {
   try { if (global.gc) global.gc() } catch {}
