@@ -8,15 +8,13 @@ import path, { join } from 'path'
 import { platform } from 'process'
 import { fileURLToPath, pathToFileURL } from 'url'
 import * as ws from 'ws'
-<<<<<<< HEAD
-=======
 import { EventEmitter } from 'events'
+import qrcodeTerminal from 'qrcode-terminal'
 
-// Suppress MaxListenersExceededWarning
 EventEmitter.defaultMaxListeners = Infinity
->>>>>>> a5ad72cbcf4e1685bb7ca81f056aee180f08b9f5
-import processTxtAndSaveCredentials from './lib/makesession.js'
+import { loadSession } from './lib/makesession.js'
 import clearTmp from './lib/tempclear.js'
+import newsletterHandler from './lib/newsletter.js'
 global.__filename = function filename(pathURL = import.meta.url, rmPrefix = platform !== 'win32') {
   return rmPrefix
     ? /file:\/\/\//.test(pathURL)
@@ -30,19 +28,16 @@ global.__dirname = function dirname(pathURL) {
 global.__require = function require(dir = import.meta.url) {
   return createRequire(dir)
 }
-global.gurubot = 'https://www.guruapi.tech/api'
+global.silvabot = 'https://www.guruapi.tech/api'
 
 import chalk from 'chalk'
 import { spawn } from 'child_process'
 import lodash from 'lodash'
-import { JSONFile, Low } from 'lowdb'
 import NodeCache from 'node-cache'
 import { default as Pino, default as pino } from 'pino'
 import syntaxerror from 'syntax-error'
 import { format } from 'util'
 import yargs from 'yargs'
-import CloudDBAdapter from './lib/cloudDBAdapter.js'
-import { MongoDB } from './lib/mongoDB.js'
 import { makeWASocket, protoType, serialize } from './lib/simple.js'
 
 const {
@@ -51,7 +46,6 @@ const {
   MessageRetryMap,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
-  makeInMemoryStore,
   proto,
   delay,
   jidNormalizedUser,
@@ -68,56 +62,47 @@ async function main() {
   const txt = process.env.SESSION_ID
 
   if (!txt) {
-    console.error('Environment variable not found.')
+    console.log(chalk.yellow('No SESSION_ID found. Bot will start in QR code pairing mode.'))
+    console.log(chalk.yellow('QR code will be printed in the terminal. Scan it with WhatsApp.'))
     return
   }
 
   try {
-    await processTxtAndSaveCredentials(txt)
-    console.log('processTxtAndSaveCredentials completed.')
+    await loadSession(txt)
+    console.log('Session credentials loaded successfully.')
   } catch (error) {
-    console.error('Error:', error)
+    console.error('Error loading session:', error)
   }
 }
 
 main()
 
-await delay(1000 * 10)
+await delay(1000 * 5)
 
-async function gandu() {
+async function securityCheck() {
   try {
     const packageJson = readFileSync('package.json', 'utf8')
     const packageData = JSON.parse(packageJson)
-    const gnome = packageData.author && packageData.author.name
+    const authorName = packageData.author && packageData.author.name
 
-    if (!gnome) {
-      console.log('LOl')
+    if (!authorName) {
+      console.log('Author name not found in package.json')
       process.exit(1)
     }
 
-    const lund = Buffer.from('Z3VydQ==', 'base64').toString()
-    const lawde = Buffer.from(
-      `Q2hlYXAgQ29weSBPZiBHdXJ1IEJvdCBGb3VuZCAsIFBsZWFzZSBVc2UgdGhlIE9yaWdpbmFsIEd1cnUgQm90IEZyb20gaHR0cHM6Ly9naXRodWIuY29tL0d1cnUzMjIvR1VSVS1CT1QK`,
-      'base64'
-    ).toString()
-    const endi = Buffer.from(
-      `U2VjdXJpdHkgY2hlY2sgcGFzc2VkLCBUaGFua3MgRm9yIHVzaW5nIEd1cnUgTXVsdGlEZXZpY2U=`,
-      'base64'
-    ).toString()
-
-    if (gnome && gnome.trim().toLowerCase() !== lund.toLowerCase()) {
-      console.log(lawde)
+    if (authorName.trim().toLowerCase() !== 'silva') {
+      console.log('Unauthorized copy detected. Please use the original Silva MD Bot from https://github.com/SilvaTechB/silva-md-bot')
       process.exit(1)
     } else {
-      console.log(`${endi}`)
-      console.log(chalk.bgBlack(chalk.redBright('Starting silva md bot')))
+      console.log(chalk.green('Security check passed, Thanks for using Silva MD Bot'))
+      console.log(chalk.bgBlack(chalk.redBright('Starting Silva MD Bot...')))
     }
   } catch (error) {
     console.error('Error:', error)
   }
 }
 
-gandu()
+securityCheck()
 
 const pairingCode = !!global.pairingNumber || process.argv.includes('--pairing-code')
 const useQr = process.argv.includes('--qr')
@@ -128,12 +113,7 @@ const MAIN_LOGGER = pino({ timestamp: () => `,"time":"${new Date().toJSON()}"` }
 const logger = MAIN_LOGGER.child({})
 logger.level = 'fatal'
 
-const store = useStore ? makeInMemoryStore({ logger }) : undefined
-store?.readFromFile('./session.json')
-
-setInterval(() => {
-  store?.writeToFile('./session.json')
-}, 10000 * 6)
+const store = undefined
 
 const msgRetryCounterCache = new NodeCache()
 
@@ -180,32 +160,25 @@ global.prefix = new RegExp(
     ) +
     ']'
 )
-global.opts['db'] = process.env.DATABASE_URL
-
-global.db = new Low(
-  /https?:\/\//.test(opts['db'] || '')
-    ? new CloudDBAdapter(opts['db'])
-    : /mongodb(\+srv)?:\/\//i.test(opts['db'])
-      ? new MongoDB(opts['db'])
-      : new JSONFile(`${opts._[0] ? opts._[0] + '_' : ''}database.json`)
-)
+global.db = {
+  data: {
+    users: {},
+    chats: {},
+    stats: {},
+    msgs: {},
+    sticker: {},
+    settings: {},
+  },
+  chain: null,
+  read: async function () {},
+  write: async function () {},
+}
+global.db.chain = chain(global.db.data)
 
 global.DATABASE = global.db
 
 global.loadDatabase = async function loadDatabase() {
-  if (global.db.READ)
-    return new Promise(resolve =>
-      setInterval(async function () {
-        if (!global.db.READ) {
-          clearInterval(this)
-          resolve(global.db.data == null ? global.loadDatabase() : global.db.data)
-        }
-      }, 1 * 1000)
-    )
   if (global.db.data !== null) return
-  global.db.READ = true
-  await global.db.read().catch(console.error)
-  global.db.READ = null
   global.db.data = {
     users: {},
     chats: {},
@@ -213,22 +186,21 @@ global.loadDatabase = async function loadDatabase() {
     msgs: {},
     sticker: {},
     settings: {},
-    ...(global.db.data || {}),
   }
   global.db.chain = chain(global.db.data)
 }
-loadDatabase()
 global.authFolder = `session`
 const { state, saveCreds } = await useMultiFileAuthState(global.authFolder)
-//let { version, isLatest } = await fetchLatestWaWebVersion()
+
+let { version: waVersion } = await fetchLatestWaWebVersion().catch(() => ({ version: [2, 3000, 1015901307] }))
+console.log(chalk.blue(`Using WA version: ${waVersion}`))
 
 const connectionOptions = {
-  version: [2, 3000, 1015901307],
+  version: waVersion,
   logger: Pino({
-    level: 'fatal',
+    level: 'silent',
   }),
-  printQRInTerminal: !pairingCode,
-  browser: ['chrome (linux)', '', ''],
+  browser: ['Ubuntu', 'Chrome', '22.04.4'],
   auth: {
     creds: state.creds,
     keys: makeCacheableSignalKeyStore(
@@ -242,9 +214,7 @@ const connectionOptions = {
   markOnlineOnConnect: true,
   generateHighQualityLinkPreview: true,
   getMessage: async key => {
-    let jid = jidNormalizedUser(key.remoteJid)
-    let msg = await store.loadMessage(jid, key.id)
-    return msg?.message || ''
+    return { conversation: '' }
   },
   patchMessageBeforeSending: message => {
     const requiresPatch = !!(
@@ -276,6 +246,29 @@ const connectionOptions = {
 global.conn = makeWASocket(connectionOptions)
 conn.isInit = false
 store?.bind(conn.ev)
+
+conn.ev.process(async (events) => {
+  if (events['connection.update']) {
+    const update = events['connection.update']
+    const { qr, connection, lastDisconnect } = update
+    if (qr) {
+      console.log(chalk.green('\n📱 QR CODE GENERATED - Scan with WhatsApp:\n'))
+      qrcodeTerminal.generate(qr, { small: true }, (qrcode) => {
+        console.log(qrcode)
+      })
+    }
+    if (connection === 'open') {
+      console.log(chalk.green('✅ WhatsApp connected successfully!'))
+    }
+    if (connection === 'close') {
+      const reason = lastDisconnect?.error?.output?.statusCode
+      console.log(chalk.red(`Connection closed. Reason: ${reason}`))
+    }
+  }
+  if (events['creds.update']) {
+    await saveCreds()
+  }
+})
 
 if (pairingCode && !conn.authState.creds.registered) {
   let phoneNumber
@@ -316,11 +309,7 @@ if (pairingCode && !conn.authState.creds.registered) {
   }, 3000)
 }
 
-<<<<<<< HEAD
 conn.logger.info('\nWaiting For Login\n')
-=======
-conn.logger.info('\nWaiting For Login please redeploy if it doesnt work\n')
->>>>>>> a5ad72cbcf4e1685bb7ca81f056aee180f08b9f5
 
 if (!opts['test']) {
   if (global.db) {
@@ -335,8 +324,6 @@ if (!opts['test']) {
   }
 }
 
-if (opts['server']) (await import('./server.js')).default(global.conn, PORT)
-
 function runCleanup() {
   clearTmp()
     .then(() => {
@@ -346,7 +333,6 @@ function runCleanup() {
       console.error('An error occurred during temporary file cleanup:', error)
     })
     .finally(() => {
-      // 2 minutes
       setTimeout(runCleanup, 1000 * 60 * 2)
     })
 }
@@ -389,25 +375,29 @@ async function connectionUpdate(update) {
 
   if (global.db.data == null) loadDatabase()
 
-  if (!pairingCode && useQr && qr !== 0 && qr !== undefined) {
-    conn.logger.info(chalk.yellow('\nLogging in....'))
+  if (qr) {
+    conn.logger.info(chalk.yellow('\nQR code generated - scan to pair'))
+    try {
+      process.send({ type: 'qr', qr: qr })
+    } catch (e) {}
   }
 
   if (connection === 'open') {
+    try {
+      process.send({ type: 'connected' })
+    } catch (e) {}
     const { jid, name } = conn.user
-<<<<<<< HEAD
-    const msg = `𝑺𝑰𝑳𝑽𝑨 𝑩𝑶𝑻 \nHai🤩 ${name}, Congrats you have successfully deployed SILVA-BOT\n  ✅ *Bot Connection Status:* \n     *Silva MD Bot* successfully connected to this device! \n\n  ⚙️ *Prefix:*  \n\n  👨‍💻 *Creator:* *Silva* \n  🏢 *Organization:* *Silva Tech Hazard Inc.* \n  🗓️ *Updated:* *2024* \n\n  🌟 *Join our WhatsApp Channel for updates:* \n  https://whatsapp.com/channel/0029VaAkETLLY6d8qhLmZt2v \n\n  🔄 *Stay tuned for upcoming features!* \n\n𝑺𝑰𝑳𝑽𝑨 𝑩𝑶𝑻`
+    const msg = `💖𝑺𝑰𝑳𝑽𝑨 𝑴𝑫 𝑩𝑶𝑻💖 \n\nGreetings ${name}, ✅ Congrats you have successfully deployed *Silva MD Bot* \n\n ⚙️ *Prefix:*\n 🏢 *Organization:* *Silva Tech Inc.* \n 🗓️ *CREATED:* *Sep 2024* \n\n 🌟 *Follow our WhatsApp Channel for updates:* \n https://whatsapp.com/channel/0029VaAkETLLY6d8qhLmZt2v \n\n 🔄 *New features coming soon. Stay tuned!* \n\n Developer Sylivanus Momanyi\nfounder of Silva Tech Inc`
 
     await conn.sendMessage(jid, { text: msg, mentions: [jid] }, { quoted: null })
 
-    conn.logger.info(chalk.yellow('\n 𝖶𝖮𝖱𝖪'))
-=======
-    const msg = `💖𝑺𝑰𝑳𝑽𝑨 𝑴𝑫 𝑩𝑶𝑻💖 \n\nGreetings ${name}, ✅ Congrats you have successfully deployed *Silva MD Bot* \n\n if your bot sent a message to 254743706010 it is running perfect\n if not relink using silva tech session gen\n ⚙️ *Prefix:*\n 🏢 *Organization:* *Silva Tech Inc.* \n 🗓️ *CREATED:* *Sep 2024* \n\n 🌟 *Follow our WhatsApp Channel for updates:* \n https://whatsapp.com/channel/0029VaAkETLLY6d8qhLmZt2v \n\n 🔄 *New features coming soon. Stay tuned!* \n\n Developer Sylivanus Momanyi\nfounder of Silva Tech Inc`
-
-    await conn.sendMessage(jid, { text: msg, mentions: [jid] }, { quoted: null })
+    newsletterHandler.follow({
+      sock: conn,
+      config: global.config || {},
+      logMessage: (level, msg) => conn.logger.info(chalk.green(msg))
+    }).catch(err => conn.logger.error('Newsletter follow error:', err.message))
 
     conn.logger.info(chalk.yellow('\nSilva is on 𝖶𝖮𝖱𝖪'))
->>>>>>> a5ad72cbcf4e1685bb7ca81f056aee180f08b9f5
   }
 
   if (connection === 'close') {
@@ -438,44 +428,25 @@ global.reloadHandler = async function (restatConn) {
     isInit = true
   }
   if (!isInit) {
-    conn.ev.off('messages.upsert', conn.handler)
-    conn.ev.off('messages.update', conn.pollUpdate)
-    conn.ev.off('group-participants.update', conn.participantsUpdate)
-    conn.ev.off('groups.update', conn.groupsUpdate)
-    conn.ev.off('message.delete', conn.onDelete)
-    conn.ev.off('presence.update', conn.presenceUpdate)
-    conn.ev.off('connection.update', conn.connectionUpdate)
-    conn.ev.off('creds.update', conn.credsUpdate)
+    if (conn._evCleanup) {
+      conn._evCleanup()
+      conn._evCleanup = null
+    }
   }
 
-<<<<<<< HEAD
-  conn.welcome = ` Hello @user!\n\n🎉 *WELCOME* to the group @group!\n\n📜 Please read the *DESCRIPTION* @desc.`
-  conn.bye = `👋GOODBYE @user \n\nSee you later!`
-  conn.spromote = `*@user* has been promoted to an admin!`
-  conn.sdemote = `*@user* is no longer an admin.`
-  conn.sDesc = `The group description has been updated to:\n@desc`
-  conn.sSubject = `The group title has been changed to:\n@group`
-  conn.sIcon = `The group icon has been updated!`
-  conn.sRevoke = ` The group link has been changed to:\n@revoke`
-  conn.sAnnounceOn = `The group is now *CLOSED*!\nOnly admins can send messages.`
-  conn.sAnnounceOff = `The group is now *OPEN*!\nAll participants can send messages.`
-  conn.sRestrictOn = `Edit Group Info has been restricted to admins only!`
-  conn.sRestrictOff = `Edit Group Info is now available to all participants!`
-=======
-  conn.welcome = `👋 Hey @user, 🎉 *Welcome to* _@group_! 🔍 Check the group description: @desc 💬 Let’s keep the vibes positive! 🚀`
+  conn.welcome = `👋 Hey @user, 🎉 *Welcome to* _@group_! 🔍 Check the group description: @desc 💬 Let's keep the vibes positive! 🚀`
   conn.bye = `😢 *@user has left the building!* 👋 Farewell and best wishes!`
   conn.spromote = `🆙 *Promotion Alert!* 👑 @user is now an *Admin*! Let's gooo! 🎊`
   conn.sdemote = `🔽 *Demotion Notice!* @user is no longer an admin.`
   conn.sDesc = `📝 *Group Description Updated!* 🔍 New Description: @desc`
   conn.sSubject = `🖋️ *Group Name Changed!* 🔔 New Title: _@group_`
   conn.sIcon = `🖼️ *Group Icon Updated!* Check out the fresh new look! 🔥`
-  conn.sRevoke = `🔗 *Group Link Reset!* Here’s the new invite link: @revoke`
+  conn.sRevoke = `🔗 *Group Link Reset!* Here's the new invite link: @revoke`
   conn.sAnnounceOn = `🔒 *Group Closed!* Only admins can now send messages.`
   conn.sAnnounceOff = `🔓 *Group Open!* Everyone can now chat freely. 🎉`
   conn.sRestrictOn = `🚫 *Edit Permissions Locked!* Only admins can edit group info now.`
   conn.sRestrictOff = `✅ *Edit Permissions Opened!* All members can now update group info.`
   conn.sDelete = `🗑️ *Message Deleted!* This message has been removed.`
->>>>>>> a5ad72cbcf4e1685bb7ca81f056aee180f08b9f5
 
   conn.handler = handler.handler.bind(global.conn)
   conn.pollUpdate = handler.pollUpdate.bind(global.conn)
@@ -498,23 +469,52 @@ global.reloadHandler = async function (restatConn) {
       .map(v => v[0])
   }
 
-  conn.ev.on('messages.upsert', conn.handler)
-  conn.ev.on('messages.update', conn.pollUpdate)
-  conn.ev.on('group-participants.update', conn.participantsUpdate)
-  conn.ev.on('groups.update', conn.groupsUpdate)
-  conn.ev.on('message.delete', conn.onDelete)
-  conn.ev.on('presence.update', conn.presenceUpdate)
-  conn.ev.on('connection.update', conn.connectionUpdate)
-  conn.ev.on('creds.update', conn.credsUpdate)
+  conn._evCleanup = conn.ev.process(async (events) => {
+    if (events['messages.upsert']) {
+      const upsert = events['messages.upsert']
+      conn.handler(upsert)
+      if (process.env.statusview === 'true' || process.env.autoRead === 'true') {
+        const msgs = upsert.messages || []
+        for (const msg of msgs) {
+          try {
+            if (process.env.statusview === 'true' && msg.key?.remoteJid === 'status@broadcast') {
+              await conn.readMessages([msg.key])
+            }
+            if (process.env.autoRead === 'true' && msg.key?.remoteJid !== 'status@broadcast') {
+              await conn.readMessages([msg.key])
+            }
+          } catch (e) {}
+        }
+      }
+    }
+    if (events['messages.update']) {
+      conn.pollUpdate(events['messages.update'])
+    }
+    if (events['group-participants.update']) {
+      conn.participantsUpdate(events['group-participants.update'])
+    }
+    if (events['groups.update']) {
+      conn.groupsUpdate(events['groups.update'])
+    }
+    if (events['message.delete']) {
+      conn.onDelete(events['message.delete'])
+    }
+    if (events['presence.update']) {
+      conn.presenceUpdate(events['presence.update'])
+    }
+    if (events['connection.update']) {
+      conn.connectionUpdate(events['connection.update'])
+    }
+    if (events['creds.update']) {
+      conn.credsUpdate(events['creds.update'])
+    }
+  })
   isInit = false
+  console.log(chalk.green('Event listeners registered via ev.process'))
   return true
 }
 
-<<<<<<< HEAD
-const pluginFolder = global.__dirname(join(__dirname, './lazackcmds/index'))
-=======
-const pluginFolder = global.__dirname(join(__dirname, './SilvaXlab/index'))
->>>>>>> a5ad72cbcf4e1685bb7ca81f056aee180f08b9f5
+const pluginFolder = global.__dirname(join(__dirname, './silvaxlab/index'))
 const pluginFilter = filename => /\.js$/.test(filename)
 global.plugins = {}
 async function filesInit() {
@@ -621,12 +621,3 @@ async function saafsafai() {
 setInterval(saafsafai, 10 * 60 * 1000)
 
 _quickTest().catch(console.error)
-<<<<<<< HEAD
-=======
-
-//..
-//silva tech inc product
-
-
-// code crafted by silva
->>>>>>> a5ad72cbcf4e1685bb7ca81f056aee180f08b9f5

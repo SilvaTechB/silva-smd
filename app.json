@@ -1,126 +1,131 @@
 {
   "name": "𝐒𝐈𝐋𝐕𝐀 𝐌𝐃 𝐁𝐎𝐓",
-<<<<<<< HEAD
-  "description": " with great power comes with great responsibilities. follow the deployment process below.",
-=======
-  "description": " with great power comes with great responsibilities. follow the deployment process below..",
->>>>>>> a5ad72cbcf4e1685bb7ca81f056aee180f08b9f5
+  "description": "A powerful multi-functional WhatsApp bot with AI features, group moderation, media tools, and 250+ commands. Built with gifted-baileys.",
   "keywords": [
-    "whatsapp bot"
+    "whatsapp bot",
+    "silva md",
+    "baileys",
+    "chatbot",
+    "automation"
   ],
   "repository": "https://github.com/SilvaTechB/silva-md-bot",
-  "stack": "container",
+  "logo": "https://raw.githubusercontent.com/SilvaTechB/silva-md-bot/main/jusorts/sylivanus.jpg",
   "env": {
+    "SESSION_ID": {
+      "description": "Your session ID. Get one at https://silva-session-selector.vercel.app/",
+      "required": true,
+      "value": ""
+    },
     "OWNERS": {
-      "description": "owner numbers",
+      "description": "Owner phone numbers separated by semicolons (e.g., 254743706010;Silva MD Bot)",
       "required": true,
       "value": "254743706010;𝐒𝐈𝐋𝐕𝐀 𝐌𝐃 𝐁𝐎𝐓"
     },
     "BOTNAME": {
-      "description": "Give your BOT a name",
+      "description": "Give your bot a display name",
       "required": true,
-      "value": "SILVA-MD-BOT©®"
-    },
-    "SESSION_ID": {
-      "description": "your session id. get session here https://silva-session-selector.vercel.app/",
-      "required": true,
-      "value": ""
+      "value": "SILVA-MD-BOT"
     },
     "MODE": {
-      "description": "mode public or private",
+      "description": "Bot mode: public (responds to everyone) or private (owner only)",
       "required": true,
       "value": "public"
     },
     "PREFIX": {
-      "description": "put any one symbol here except @ and + , leave it Blank if you want to use multiple prefix",
+      "description": "Command prefix symbol (e.g., . or ! or #). Leave blank for multi-prefix",
       "required": true,
       "value": "."
     },
+    "PORT": {
+      "description": "Server port for the landing page",
+      "required": false,
+      "value": "5000"
+    },
     "statusview": {
-      "description": "make it true if you want bot to view status",
-      "required": true,
+      "description": "Auto-view WhatsApp statuses (true/false)",
+      "required": false,
       "value": "true"
     },
     "autoRead": {
-      "description": "make it true or false if you want bot to read messages leave it blank if you don't want it to read messages",
+      "description": "Auto-read incoming messages (true/false)",
       "required": false,
-      "value": ""
-      },
-<<<<<<< HEAD
-=======
-    "WELCOME_MSG": {
-      "description": "make it true or false if you want bot to Send welcome message when someone joins a group",
-      "required": false,
-      "value": "true"
-      },
-    "GOODBYE_MSG": {
-      "description": "make it true or false if you want bot to Send goodbye message when someone leaves a group",
-      "required": false,
-      "value": "true"
-      },
-    "ANTILINK": {
-      "description": "make it true or false if you want bot to delete group links sent in groups. of you are admin",
-      "required": false,
-      "value": "true"
-      },
->>>>>>> a5ad72cbcf4e1685bb7ca81f056aee180f08b9f5
-    "AUTO_RECORDING": {
-      "description": "make it true or false. true to activate false to deactivate",
-      "required": false,
-      "value": "true"
-       },
-<<<<<<< HEAD
-=======
-    "AUTO_TYPING": {
-      "description": "make it true or false. true to activate false to deactivate",
-      "required": false,
-      "value": "true"
-       },
->>>>>>> a5ad72cbcf4e1685bb7ca81f056aee180f08b9f5
-    "AUTO_STATUS_LIKE": {
-      "description": "make it true or false. true to activate false to deactivate",
-      "required": true,
-      "value": "true"
-       },
-    "AUTO_STATUS_LIKE_EMOJI": {
-      "description": "customize to any emoji you need 💚",
-      "required": false,
-      "value": "🦋"
-       },
-    "STATUS_REPLY": {
-      "description": "make it true or false. true to activate false to deactivate",
-      "required": true,
       "value": "false"
-       },
+    },
+    "AUTO_STATUS_LIKE": {
+      "description": "Auto-like WhatsApp statuses with an emoji (true/false)",
+      "required": false,
+      "value": "true"
+    },
+    "AUTO_STATUS_LIKE_EMOJI": {
+      "description": "Emoji used to react to statuses",
+      "required": false,
+      "value": "💚"
+    },
+    "Status_Saver": {
+      "description": "Forward viewed statuses to bot owner (true/false)",
+      "required": false,
+      "value": "false"
+    },
+    "STATUS_REPLY": {
+      "description": "Auto-reply to people who post statuses (true/false)",
+      "required": false,
+      "value": "false"
+    },
     "STATUS_MSG": {
-      "description": "custmize with your message",
+      "description": "Custom message sent as status reply",
       "required": false,
       "value": "SILVA MD BOT SUCCESSFULLY VIEWED YOUR STATUS 💖💚"
     },
-    "antidelete": {
-      "description": "bot will forward deleted messages if you make it true",
+    "WELCOME_MSG": {
+      "description": "Send welcome message when someone joins a group (true/false)",
       "required": false,
       "value": "true"
+    },
+    "GOODBYE_MSG": {
+      "description": "Send goodbye message when someone leaves a group (true/false)",
+      "required": false,
+      "value": "true"
+    },
+    "ANTILINK": {
+      "description": "Auto-delete group links sent in groups when bot is admin (true/false)",
+      "required": false,
+      "value": "true"
+    },
+    "antidelete": {
+      "description": "Forward deleted messages to bot owner (true/false)",
+      "required": false,
+      "value": "true"
+    },
+    "AUTO_RECORDING": {
+      "description": "Show recording status when processing commands (true/false)",
+      "required": false,
+      "value": "false"
+    },
+    "AUTO_TYPING": {
+      "description": "Show typing status when processing commands (true/false)",
+      "required": false,
+      "value": "false"
+    },
+    "ANTICALL": {
+      "description": "Auto-reject and block callers (true/false)",
+      "required": false,
+      "value": "true"
+    },
+    "ANTIVIEWONCE": {
+      "description": "Forward view-once messages so they can be seen again (true/false)",
+      "required": false,
+      "value": "false"
+    },
+    "REMOVEBG_KEY": {
+      "description": "API key for remove.bg background removal (get at https://www.remove.bg/api)",
+      "required": false,
+      "value": ""
     }
-    },
-    "buildpacks": [
-    {
-      "url": "heroku/nodejs"
-    },
-    {
-      "url": "https://github.com/DuckyTeam/heroku-buildpack-imagemagick.git"
-    },
-    {
-      "url": "https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest"
-    },
-    {
-      "url": "https://github.com/clhuang/heroku-buildpack-webp-binaries.git"
-    }
-  ],
-  "formation": {
-    "web": {
-      "quantity": 1,
-      "size": "basic"
-    }
+  },
+  "scripts": {
+    "start": "node silva.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }
