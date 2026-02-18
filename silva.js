@@ -5,16 +5,9 @@ import figlet from 'figlet'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { EventEmitter } from 'events'
-EventEmitter.defaultMaxListeners = Infinity
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-
-figlet('SILVA MD', { font: 'Ghost' }, (err, data) => {
-  if (err) return console.error(chalk.red('Figlet error:'), err)
-  console.log(chalk.yellow(data))
-})
 
 figlet('Silva Bot', (err, data) => {
   if (err) return console.error(chalk.red('Figlet error:'), err)
@@ -39,9 +32,10 @@ async function start(file) {
   if (isRunning) return
   isRunning = true
 
-  const args = [path.join(__dirname, file), ...process.argv.slice(2)]
+  const args = ['--max-old-space-size=384', '--optimize-for-size', '--expose-gc', path.join(__dirname, file), ...process.argv.slice(2)]
   const child = spawn(process.argv[0], args, {
-    stdio: ['inherit', 'inherit', 'inherit', 'ipc']
+    stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+    env: { ...process.env, NODE_OPTIONS: '--max-old-space-size=384' }
   })
 
   child.on('message', data => {
@@ -82,20 +76,12 @@ async function start(file) {
   })
 
   const pluginsFolder = path.join(__dirname, 'silvaxlab')
-  fs.readdir(pluginsFolder, async (err, files) => {
+  fs.readdir(pluginsFolder, (err, files) => {
     if (err) {
       console.error(chalk.red(`Error reading plugins: ${err}`))
       return
     }
     console.log(chalk.yellow(`Installed ${files.length} plugins`))
-
-    try {
-      const { default: baileys } = await import('@whiskeysockets/baileys')
-      const version = (await baileys.fetchLatestBaileysVersion()).version
-      console.log(chalk.blue(`Using Baileys version ${version}`))
-    } catch {
-      console.error(chalk.red('Baileys library is not installed.'))
-    }
   })
 }
 
